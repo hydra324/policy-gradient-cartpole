@@ -195,16 +195,29 @@ class PGAgent():
 			4. Compute policy loss and update the policy
 			'''
 			rt = torch.zeros(rewards_ten.shape[0],1).to(self.device)
-			cumulative = 0
-			for t in reversed(range(len(rewards))):
-				cumulative = float(self.discount)*cumulative + rewards[t] 
-				rt[t] = cumulative
+
 			###### TYPE YOUR CODE HERE ######
 			# Do steps 1-4
-			# gammas = torch.from_numpy(np.stack([self.discount**i for i in range(rewards_ten.shape[0])])).to(self.device)
-			# rt = torch.flip(torch.cumsum(torch.flip(torch.mul(gammas,rewards_ten),[0]),dim=0),[0])
+			num_traj = 1
+			cumulative = 0
+			for t in reversed(range(rewards_ten.shape[0])):
+				if n_dones[t]==0:
+					num_traj += 1
+				cumulative = (self.discount*cumulative*(n_dones_ten[t]) + rewards_ten[t])
+				rt[t] = cumulative
+			
+			# fill trajectories with discounted rewards
+			traj_start = 0
+			for i in range(len(n_dones)):
+				if n_dones[i]==0:
+					traj_end = i
+					rt[traj_start:traj_end+1] = rt[traj_start]
+					traj_start = traj_end+1
+			if traj_start<len(n_dones):
+				rt[traj_start:]=rt[traj_start]
+
 			log_probs = self.policy.get_log_prob(states_ten,action_ten)
-			loss = -torch.sum(torch.mul(log_probs,rt))
+			loss = -torch.sum(torch.mul(log_probs,rt))/num_traj
 			self.optimizer_policy.zero_grad()
 			loss.backward()
 			self.optimizer_policy.step()
@@ -222,8 +235,11 @@ class PGAgent():
 
 			###### TYPE YOUR CODE HERE ######
 			# Compute reward_to_go (gt)
+			num_traj = 1
 			cumulative = 0
 			for t in reversed(range(rewards_ten.shape[0])):
+				if n_dones[t]==0:
+					num_traj += 1
 				cumulative = (self.discount*cumulative*(n_dones_ten[t]) + rewards_ten[t])
 				gt[t] = cumulative
 			#################################
@@ -233,7 +249,7 @@ class PGAgent():
 			###### TYPE YOUR CODE HERE ######
 			# Compute log probabilities and update the policy
 			log_probs = self.policy.get_log_prob(states_ten,action_ten)
-			loss = -torch.sum(torch.mul(log_probs,gt))
+			loss = -torch.sum(torch.mul(log_probs,gt))/num_traj
 			self.optimizer_policy.zero_grad()
 			loss.backward()
 			self.optimizer_policy.step()
@@ -256,8 +272,11 @@ class PGAgent():
 
 			###### TYPE YOUR CODE HERE ######
 			# Compute reward_to_go (gt) and advantages
+			num_traj = 1
 			cumulative = 0
 			for t in reversed(range(rewards_ten.shape[0])):
+				if n_dones[t]==0:
+					num_traj += 1
 				cumulative = (self.discount*cumulative*(n_dones_ten[t]) + rewards_ten[t])
 				gt[t] = cumulative
 
@@ -274,7 +293,7 @@ class PGAgent():
 			self.optimizer_value.step()
 
 			log_probs = self.policy.get_log_prob(states_ten,action_ten)
-			loss = -torch.mean(torch.mul(log_probs,advantages))
+			loss = -torch.sum(torch.mul(log_probs,advantages))/num_traj
 			self.optimizer_policy.zero_grad()
 			loss.backward()
 			self.optimizer_policy.step()
@@ -318,71 +337,71 @@ if __name__ == "__main__":
 
 	moving_window = deque(maxlen=10)
 
-	# reward_log = []
-	# consistency_count = 0
-	# for e in range(args.n_iter):
-	# 	'''
-	# 	Steps of PG algorithm
-	# 		1. Sample environment to gather data using a policy
-	# 		2. Update the policy using the data
-	# 		3. Evaluate the updated policy
-	# 		4. Repeat 1-3
-	# 	'''
-	# 	states,actions,rewards,n_dones,train_reward = learner.sample_traj(batch_size=args.batch_size)
-	# 	learner.update(states,actions,rewards,n_dones,args.algo)
-	# 	eval_reward= learner.sample_traj(evaluate=True)
-	# 	moving_window.append(eval_reward)
-	# 	print('Training Iteration {} Training Reward: {:.2f} Evaluation Reward: {:.2f} \
-	# 	Average Evaluation Reward: {:.2f}'.format(e,train_reward,eval_reward,np.mean(moving_window)))
+	reward_log = []
+	consistency_count = 0
+	for e in range(args.n_iter):
+		'''
+		Steps of PG algorithm
+			1. Sample environment to gather data using a policy
+			2. Update the policy using the data
+			3. Evaluate the updated policy
+			4. Repeat 1-3
+		'''
+		states,actions,rewards,n_dones,train_reward = learner.sample_traj(batch_size=args.batch_size)
+		learner.update(states,actions,rewards,n_dones,args.algo)
+		eval_reward= learner.sample_traj(evaluate=True)
+		moving_window.append(eval_reward)
+		print('Training Iteration {} Training Reward: {:.2f} Evaluation Reward: {:.2f} \
+		Average Evaluation Reward: {:.2f}'.format(e,train_reward,eval_reward,np.mean(moving_window)))
 		
-	# 	"""
-	# 	TODO: Write code for
-	# 	1. Logging and plotting
-	# 	2. Rendering the trained agent 
-	# 	"""
-	# 	###### TYPE YOUR CODE HERE ######
-	# 	moving_avg_reward = np.mean(moving_window)
-	# 	reward_log.append(moving_avg_reward)
-	# 	if moving_avg_reward>=200.:
-	# 		consistency_count += 1
-	# 		if consistency_count == 50:
-	# 			# means that our agent has achieved a cumulative reward of >=200 for the last 50 episodes
-	# 			# we can now stop our agent
-	# 			torch.save(learner.policy.state_dict(),f'./policy_model_{args.algo}.ckpt')
-	# 			break
-	# 	else:
-	# 		consistency_count = 0
+		"""
+		TODO: Write code for
+		1. Logging and plotting
+		2. Rendering the trained agent 
+		"""
+		###### TYPE YOUR CODE HERE ######
+		moving_avg_reward = np.mean(moving_window)
+		reward_log.append(moving_avg_reward)
+		if moving_avg_reward>=200.:
+			consistency_count += 1
+			if consistency_count == 10:
+				# means that our agent has achieved a cumulative reward of >=200 for the last 10 episodes
+				# we can now stop our agent
+				torch.save(learner.policy.state_dict(),f'./policy_model_{args.algo}.ckpt')
+				break
+		else:
+			consistency_count = 0
 	
-	# # now that training has finished, we can plot cumulative reward vs episodes
-	# pickle.dump(reward_log,open(f'./reward_log_{args.algo}.pkl','wb'))
-	# # reward_log=pickle.load(open(f'./reward_log_{args.algo}.pkl','rb'))
-	# plt.subplots_adjust(bottom=0.2)
-	# plt.plot(reward_log)
-	# plt.xlabel('Episodes')
-	# plt.ylabel('Cumulative reward')
-	# plt.figtext(x=0.1,y=0.04,s=f'learning rate: algo: {args.algo}, {args.lr}, batch size: {args.batch_size}, discount: {args.discount}',fontsize=12, va="bottom")
-	# plt.savefig(f'reward_plot_{args.algo}_{args.lr}_{args.batch_size}_{args.discount}.png')
+	# now that training has finished, we can plot cumulative reward vs episodes
+	pickle.dump(reward_log,open(f'./reward_log_{args.algo}.pkl','wb'))
+	# reward_log=pickle.load(open(f'./reward_log_{args.algo}.pkl','rb'))
+	plt.subplots_adjust(bottom=0.2)
+	plt.plot(reward_log)
+	plt.xlabel('Episodes')
+	plt.ylabel('Cumulative reward')
+	plt.figtext(x=0.1,y=0.04,s=f'learning rate: algo: {args.algo}, {args.lr}, batch size: {args.batch_size}, discount: {args.discount}',fontsize=12, va="bottom")
+	plt.savefig(f'reward_plot_{args.algo}_{args.lr}_{args.batch_size}_{args.discount}.png')
 
 
 	# next, we render the learned agent
 	# load the saved model
-	learner.policy.load_state_dict(torch.load('./policy_model_Baseline.ckpt'))
-	learner.policy.eval()
-	env = gym.make(args.env,continuous=True,render_mode="rgb_array_list")
-	env = gym.wrappers.RecordVideo(env=env,video_folder='./video')
-	with torch.no_grad():
-		for i in range(1):
-			state,_ = env.reset()
-			cum_reward = 0
-			while True:
-				state_ten = torch.from_numpy(state).float().unsqueeze(0)
-				# get the mean action according to our policy network
-				action = learner.policy(state_ten)[0][0].numpy()
-				env.render()
-				state,reward,done,_,_ = env.step(action)
-				cum_reward += reward
-				if done:
-					break
-			print(f'Reward for this episode is {cum_reward}')
-	env.close()
+	# learner.policy.load_state_dict(torch.load('./policy_model_Baseline.ckpt'))
+	# learner.policy.eval()
+	# env = gym.make(args.env,continuous=True,render_mode="rgb_array_list")
+	# env = gym.wrappers.RecordVideo(env=env,video_folder='./video')
+	# with torch.no_grad():
+	# 	for i in range(1):
+	# 		state,_ = env.reset()
+	# 		cum_reward = 0
+	# 		while True:
+	# 			state_ten = torch.from_numpy(state).float().unsqueeze(0)
+	# 			# get the mean action according to our policy network
+	# 			action = learner.policy(state_ten)[0][0].numpy()
+	# 			env.render()
+	# 			state,reward,done,_,_ = env.step(action)
+	# 			cum_reward += reward
+	# 			if done:
+	# 				break
+	# 		print(f'Reward for this episode is {cum_reward}')
+	# env.close()
 		#################################
